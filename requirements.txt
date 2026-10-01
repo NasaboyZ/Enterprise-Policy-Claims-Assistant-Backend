@@ -1,19 +1,20 @@
-# Setup dependencies from phase 1; AI services are implemented in later phases.
-fastapi
-langchain
-langchain-community
-langchain-openai
-langchain-chroma
-langchain-text-splitters
-langgraph
-chromadb
-scikit-learn
-ragas
-uvicorn
-pydantic
+# Verified runtime dependencies for phases 1-4; Ragas is reserved for phase 5.
+fastapi==0.142.2
+langchain==1.4.3
+# Ragas 0.4.3 still imports VertexAI modules removed in community 0.4.2.
+langchain-community==0.4.1
+langchain-openai==1.1.9
+langchain-chroma==1.1.0
+langchain-text-splitters==1.1.2
+langgraph==1.2.12
+chromadb==1.5.9
+scikit-learn==1.9.1
+ragas==0.4.3
+uvicorn==0.54.0
+pydantic==2.13.5
 # Data preparation, model persistence and synthetic PDF fixtures.
-pandas
-joblib
-reportlab
-pypdf
-python-dotenv
+pandas==3.0.6
+joblib==1.6.0
+reportlab==5.0.1
+pypdf==6.19.0
+python-dotenv==1.2.3
