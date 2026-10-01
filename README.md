@@ -37,6 +37,49 @@ Dieses Backend deckt die Kernkompetenzen eines modernen AI Engineers ab:
 
 ## Quickstart
 
+### Alles mit Docker starten
+
+Docker Desktop starten und im Backend-Verzeichnis ausführen:
+
+```bash
+docker compose up --build -d
+```
+
+Voraussetzung: Eine lokale `.env` mit `AION_API_KEY` (siehe `.env.example`).
+Der Befehl baut das Image, bereitet ML-Modell und Dokumentenindex vor und startet
+die API. Beim ersten Start wird das lokale Embedding-Modell heruntergeladen;
+das kann einige Minuten dauern. Es wird kein Google-Key benötigt. Der Start
+verbraucht kein Aion-Kontingent und führt keine Ragas-Evaluation aus.
+
+- API und interaktive Dokumentation: **http://localhost:8000/docs**
+- Erreichbarkeit: **http://localhost:8000/health**
+- Startfortschritt und Logs: `docker compose logs -f backend`
+- Status: `docker compose ps`
+- Stoppen: `docker compose down`
+
+Dokumente, Index, Modelle und Berichte bleiben in benannten Docker-Volumes
+erhalten. `docker compose down -v` würde diese Daten löschen. Die Docker-Daten
+sind getrennt von den lokal unter `data/`, `models/` und `reports/` gespeicherten
+Dateien. Die API wird nur auf `127.0.0.1:8000` veröffentlicht; sie ist eine lokale
+Demo ohne Benutzerverwaltung. Genau einen Worker verwenden und während Uploads
+keinen zweiten Indexierungsprozess starten.
+
+Evaluation bewusst separat starten (verbraucht zusätzliche Aion-Anfragen):
+
+```bash
+# Ein Testfall; liefert absichtlich Exitcode 2, weil der Gesamtbericht unvollständig ist.
+docker compose exec backend python -m app.eval --limit 1
+
+# Alle fünf Testfälle und vollständiges Quality Gate.
+docker compose exec backend python -m app.eval
+```
+
+`GET /api/metrics` liefert den zuletzt gespeicherten Bericht. Vor der ersten
+Auswertung antwortet der Endpoint mit HTTP 404. Ein API-Aufruf oder Upload
+startet niemals automatisch eine Evaluation.
+
+### Lokal ohne Docker
+
 1. **Abhängigkeiten installieren:**
    ```bash
    python -m venv .venv
@@ -97,3 +140,76 @@ Dieses Backend deckt die Kernkompetenzen eines modernen AI Engineers ab:
    Die Tests prüfen die API-Anbindung mit simulierten HTTP-Antworten und
    verbrauchen kein API-Kontingent. Sie belegen nicht die Qualität echter
    Modellantworten.
+
+5. **API starten:**
+   ```bash
+   python -m app.ml_model
+   python -m app.rag_engine index
+   uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
+   ```
+   Die ersten beiden Befehle sind nur zur Vorbereitung bzw. Aktualisierung der
+   lokalen Artefakte nötig. Die Endpoints sind dieselben wie im Container.
+
+## REST-API
+
+`POST /api/chat` verwendet den vorhandenen Agenten-Payload:
+
+```bash
+curl http://localhost:8000/api/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"Welcher Selbstbehalt gilt bei Leitungswasser?","claim":{"customer_age":40,"claim_amount":100,"claim_type":"water"}}'
+```
+
+Die Antwort enthält `status`, `ml_score`, `final_answer`, `sources` und
+`error_code`. `answered`, `manual_review` und `insufficient_context` sind normale
+HTTP-200-Ergebnisse. Eingabefehler liefern 422, ausgeschöpfte API-Kontingente 429,
+ungültige Modellantworten 502 und nicht verfügbare Dienste 503.
+
+Genau eine neue PDF hochladen und sofort lokal indexieren:
+
+```bash
+curl http://localhost:8000/api/upload -F 'file=@/pfad/zur/police.pdf'
+curl http://localhost:8000/api/metrics
+```
+
+Uploads dürfen höchstens 10 MiB und 100 Seiten enthalten. Verschlüsselte,
+beschädigte und textlose PDFs werden abgewiesen; OCR ist nicht enthalten.
+Neue Dateien erhalten einen Namen aus ihrem Inhalts-Hash. Identische Inhalte
+werden erkannt, bestehende Dateien nicht überschrieben. Erfolgreiche neue
+Uploads liefern HTTP 201, Duplikate HTTP 200. Bei Indexfehlern werden die neuen
+Einträge zurückgenommen; andere Dokumente bleiben erhalten.
+
+## Ragas-Evaluation und Quality Gate
+
+```bash
+python -m app.eval
+python -m app.eval --faithfulness-threshold 0.80 --relevance-threshold 0.70
+```
+
+Die fünf Referenzfälle stehen in `data/eval_cases.json`. Der echte Agent läuft
+mit einem festgelegten Niedrigrisiko-Schaden. Ragas 0.4.3 bewertet seine Antworten
+gegen die tatsächlich abgerufenen Abschnitte. Aion dient ausdrücklich als
+Antwortmodell und Bewerter; für die Relevanzberechnung werden lokale Embeddings
+und eine Vergleichsfrage pro Antwort verwendet (`strictness=1`). Es gibt keine
+zusätzlichen Prompt-Beispiele; der Bewerter verwendet `reasoning_effort=none`
+und höchstens 2.048 Ausgabetokens, um das Kontingent zu schonen. Es gibt keine
+automatischen Anbieterwechsel oder API-/Parser-Wiederholungen. Anfragen haben
+mindestens fünf Sekunden Abstand. Eine vollständige Auswertung benötigt im
+Normalfall etwa 20 Aion-Anfragen und kann das Tageskontingent überschreiten.
+
+Berichte werden unter `reports/<run_id>.json` und atomar als `reports/latest.json`
+gespeichert. Sie enthalten Konfiguration, Daten-Hashes, Referenzen, Antworten,
+Kontexte, Einzelwerte, Mittelwerte und Fehlerstatus. Während eines Laufs keine
+Dokumente hochladen oder den Index parallel aktualisieren.
+
+Das Gate verlangt alle fünf beantworteten Fälle mit endlichen Messwerten und
+Mittelwerten von mindestens 0.80 für Faithfulness und 0.70 für AnswerRelevancy.
+Exitcodes: `0` bestanden, `1` Qualitätsgrenzen verfehlt, `2` unvollständig oder
+technischer Fehler. Bei einem Kontingentfehler bleibt ein als unvollständig
+markierter Bericht erhalten. Ein Teillauf ersetzt ebenfalls `latest.json`;
+ältere Berichte bleiben unter ihrer Run-ID erhalten.
+
+Diese Demo-Bewertung durch dasselbe Modell ist kein unabhängiger Nachweis
+fachlicher Korrektheit oder Halluzinationsfreiheit. Referenzantworten dienen
+auch der manuellen Nachprüfung. Offline-Tests simulieren die LLM-Antworten und
+dürfen nicht mit einem erfolgreichen Live-Quality-Gate verwechselt werden.

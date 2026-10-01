@@ -1,0 +1,7 @@
+[
+  {"id": "regular_deductible", "question": "Welcher reguläre Selbstbehalt gilt bei Leitungswasserschäden am Hausrat?", "reference": "Der reguläre Selbstbehalt beträgt CHF 200 je Ereignis."},
+  {"id": "theft_deductible", "question": "Wie hoch ist der Selbstbehalt bei Einbruchdiebstahl in der Hausratversicherung?", "reference": "Für Einbruchdiebstahl gilt ein Selbstbehalt von CHF 300."},
+  {"id": "insured_sum", "question": "Wie hoch ist die Versicherungssumme der Hausratpolice DEMO-POL-0001 je Ereignis?", "reference": "Die Versicherungssumme beträgt CHF 80 000 je Ereignis."},
+  {"id": "bicycle_limit", "question": "Welche Entschädigungsgrenze gilt für Fahrräder innerhalb der Wohnung laut Hausratpolice DEMO-POL-0001?", "reference": "Für Fahrräder innerhalb der versicherten Wohnung gilt eine Entschädigungsgrenze von CHF 2 000 je Ereignis."},
+  {"id": "notification_deadline", "question": "Innerhalb welcher Frist muss ein Hausratschaden nach seiner Entdeckung gemeldet werden?", "reference": "Schäden sind innerhalb von fünf Kalendertagen nach Entdeckung zu melden."}
+]

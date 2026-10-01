@@ -1,5 +1,6 @@
-# Verified runtime dependencies for phases 1-4; Ragas is reserved for phase 5.
+# Runtime dependencies; development tools are in requirements-dev.txt.
 fastapi==0.142.2
+python-multipart==0.0.22
 langchain==1.4.3
 # Ragas 0.4.3 still imports VertexAI modules removed in community 0.4.2.
 langchain-community==0.4.1

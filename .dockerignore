@@ -1,0 +1,11 @@
+**
+!Dockerfile
+!requirements.txt
+!app/
+!app/*.py
+!data/
+!data/avb_hausrat.pdf
+!data/avb_privathaftpflicht.pdf
+!data/police_hausrat.pdf
+!data/claims.csv
+!data/eval_cases.json

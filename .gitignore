@@ -10,3 +10,6 @@ tmp/
 models/*.pkl
 models/embeddings/
 data/chroma/
+reports/
+data/upload-*.pdf
+data/.upload-*

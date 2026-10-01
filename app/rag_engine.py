@@ -75,24 +75,30 @@ class RagEngine:
         """Read all inputs before touching the index; fail on unreadable/scanned PDFs."""
         if not self.settings.data_dir.is_dir():
             raise RagError(f"PDF-Verzeichnis fehlt: {self.settings.data_dir}")
-        splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
         chunks = []
         paths = sorted(p for p in self.settings.data_dir.iterdir() if p.is_file() and p.suffix.lower() == ".pdf")
         for path in paths:
-            digest = hashlib.sha256(path.read_bytes()).hexdigest()
-            try:
-                pages = PyPDFLoader(str(path), mode="page").load()
-            except Exception as exc:
-                raise RagError(f"PDF kann nicht gelesen werden: {path.name}") from exc
-            if not pages or not any(page.page_content.strip() for page in pages):
-                raise RagError(f"PDF enthält keinen extrahierbaren Text: {path.name} (OCR nicht implementiert).")
-            for page in pages:
-                page.metadata = {"filename": path.name, "page": int(page.metadata["page"]) + 1,
-                                 "file_sha256": digest}
-            for index, chunk in enumerate(splitter.split_documents(pages)):
-                identity = f"v1:{path.name}:{digest}:{index}:{chunk.page_content}"
-                chunk.metadata["chunk_id"] = hashlib.sha256(identity.encode()).hexdigest()
-                chunks.append(chunk)
+            chunks.extend(self.load_pdf_chunks(path))
+        return chunks
+
+    @staticmethod
+    def load_pdf_chunks(path, filename=None):
+        filename = filename or path.name
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        try:
+            pages = PyPDFLoader(str(path), mode="page").load()
+        except Exception as exc:
+            raise RagError(f"PDF kann nicht gelesen werden: {filename}") from exc
+        if not pages or not any(page.page_content.strip() for page in pages):
+            raise RagError(f"PDF enthält keinen extrahierbaren Text: {filename} (OCR nicht implementiert).")
+        for page in pages:
+            page.metadata = {"filename": filename, "page": int(page.metadata["page"]) + 1,
+                             "file_sha256": digest}
+        splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
+        chunks = splitter.split_documents(pages)
+        for index, chunk in enumerate(chunks):
+            identity = f"v1:{filename}:{digest}:{index}:{chunk.page_content}"
+            chunk.metadata["chunk_id"] = hashlib.sha256(identity.encode()).hexdigest()
         return chunks
 
     def index(self) -> dict:

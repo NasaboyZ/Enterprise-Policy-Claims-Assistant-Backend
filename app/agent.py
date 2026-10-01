@@ -145,6 +145,16 @@ class GeminiAnswerGenerator:
             raise translate_provider_error(exc) from None
 
 
+def create_aion_chat_model(settings: Settings, *, rate_limiter=None):
+    return ChatOpenAI(
+        model=settings.aion_chat_model, api_key=require_aion_key(),
+        base_url="https://api.aionlabs.ai/v1", use_responses_api=False,
+        temperature=0, timeout=60, max_retries=0, rate_limiter=rate_limiter,
+        # Aion documents max_tokens; LangChain otherwise renames it.
+        extra_body={"max_tokens": 4096},
+    )
+
+
 class AionAnswerGenerator:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -153,13 +163,7 @@ class AionAnswerGenerator:
     def generate(self, query: str, context: list[RetrievedChunk]) -> GroundedAnswer:
         try:
             if self.model is None:
-                self.model = ChatOpenAI(
-                    model=self.settings.aion_chat_model, api_key=require_aion_key(),
-                    base_url="https://api.aionlabs.ai/v1", use_responses_api=False,
-                    temperature=0, timeout=60, max_retries=0,
-                    # Aion documents max_tokens; LangChain otherwise renames it.
-                    extra_body={"max_tokens": 4096},
-                )
+                self.model = create_aion_chat_model(self.settings)
             response = self.model.invoke([
                 SystemMessage(content=SYSTEM_PROMPT + "\nAntworte ausschliesslich mit einem JSON-Objekt "
                               "gemäss diesem Schema, ohne Markdown oder zusätzlichen Text:\n"
