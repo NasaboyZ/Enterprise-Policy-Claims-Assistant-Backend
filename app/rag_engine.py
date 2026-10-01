@@ -11,10 +11,10 @@ from chromadb.errors import NotFoundError
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.embeddings import Embeddings
-from langchain_openai import OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from app.config import Settings, require_openai_key
+from app.config import Settings
+from app.gemini_embeddings import GeminiEmbeddings
 
 CHUNK_SIZE = 600
 CHUNK_OVERLAP = 80
@@ -47,7 +47,8 @@ class RagEngine:
             path=str(self.settings.chroma_dir),
             settings=ChromaSettings(anonymized_telemetry=False),
         )
-        expected = {"embedding_model": self.settings.embedding_model, "schema_version": 1}
+        expected = {"embedding_model": self.settings.embedding_model, "schema_version": 2,
+                    "embedding_provider": "google", "embedding_format": "retrieval-prefix-v1"}
         try:
             collection = client.get_collection(self.settings.collection_name)
         except NotFoundError:
@@ -66,10 +67,7 @@ class RagEngine:
 
     def _embeddings(self) -> Embeddings:
         if self.embeddings is None:
-            require_openai_key()
-            self.embeddings = OpenAIEmbeddings(
-                model=self.settings.embedding_model, max_retries=2, request_timeout=30,
-            )
+            self.embeddings = GeminiEmbeddings(model=self.settings.embedding_model)
         return self.embeddings
 
     def load_chunks(self):
@@ -147,8 +145,8 @@ def main():
     search = sub.add_parser("search", help="Drei ähnliche Abschnitte suchen")
     search.add_argument("query")
     args = parser.parse_args()
-    engine = RagEngine()
     try:
+        engine = RagEngine()
         result = engine.index() if args.command == "index" else [asdict(c) for c in engine.retrieve(args.query)]
     except (RagError, RuntimeError, ValueError) as exc:
         parser.exit(1, f"{exc}\n")

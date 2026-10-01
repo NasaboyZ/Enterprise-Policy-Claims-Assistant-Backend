@@ -11,11 +11,12 @@ import joblib
 import numpy as np
 import pandas as pd
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.config import Settings, require_openai_key
+from app.config import Settings, require_google_key
+from app.provider_errors import ProviderError, translate_provider_error
 from app.ml_model import FEATURES
 from app.rag_engine import RagEngine, RetrievedChunk
 
@@ -122,23 +123,25 @@ Eine Hausratpolice darf nicht mit Leistungen einer anderen Versicherung vermisch
 """
 
 
-class OpenAIAnswerGenerator:
+class GeminiAnswerGenerator:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.model = None
 
     def generate(self, query: str, context: list[RetrievedChunk]) -> GroundedAnswer:
-        if self.model is None:
-            require_openai_key()
-            self.model = ChatOpenAI(model=self.settings.chat_model, temperature=0,
-                                    timeout=30, max_retries=2).with_structured_output(
-                GroundedAnswer, method="json_schema", strict=True,
-            )
-        return self.model.invoke([
-            SystemMessage(content=SYSTEM_PROMPT),
-            HumanMessage(content=json.dumps({"question": query, "sources": [asdict(c) for c in context]},
-                                           ensure_ascii=False)),
-        ])
+        try:
+            if self.model is None:
+                self.model = ChatGoogleGenerativeAI(
+                    model=self.settings.chat_model, api_key=require_google_key(),
+                    vertexai=False, temperature=0, timeout=30, max_retries=0,
+                ).with_structured_output(GroundedAnswer, method="json_schema")
+            return self.model.invoke([
+                SystemMessage(content=SYSTEM_PROMPT),
+                HumanMessage(content=json.dumps({"question": query, "sources": [asdict(c) for c in context]},
+                                               ensure_ascii=False)),
+            ])
+        except Exception as exc:
+            raise translate_provider_error(exc) from None
 
 
 def error_state(code: str, message: str) -> dict:
@@ -169,6 +172,8 @@ def build_graph(settings: Settings, scorer: RiskScorer, retriever: Retriever, ge
     def retrieve(state):
         try:
             context = retriever.retrieve(state["request"].query)
+        except ProviderError as exc:
+            return error_state(exc.code, str(exc))
         except Exception:
             return error_state("retrieval_failed", "Dokumentensuche fehlgeschlagen. Index und API-Konfiguration prüfen.")
         if not context or not any(c.text.strip() for c in context):
@@ -179,6 +184,8 @@ def build_graph(settings: Settings, scorer: RiskScorer, retriever: Retriever, ge
     def generate(state):
         try:
             answer = GroundedAnswer.model_validate(generator.generate(state["request"].query, state["context"]))
+        except ProviderError as exc:
+            return error_state(exc.code, str(exc))
         except Exception:
             return error_state("generation_failed", "Antwortgenerierung fehlgeschlagen. API-Konfiguration prüfen.")
         if not answer.supported:
@@ -217,7 +224,7 @@ class InsuranceAgent:
                  retriever: Retriever | None = None, generator: AnswerGenerator | None = None):
         settings = settings or Settings.from_env()
         self.graph = build_graph(settings, scorer or ModelRiskScorer(settings),
-                                 retriever or RagEngine(settings), generator or OpenAIAnswerGenerator(settings))
+                                 retriever or RagEngine(settings), generator or GeminiAnswerGenerator(settings))
 
     def run(self, request: AgentRequest | dict) -> AgentResult:
         request = AgentRequest.model_validate(request)

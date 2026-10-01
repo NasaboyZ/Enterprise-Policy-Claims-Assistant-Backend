@@ -6,6 +6,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from app.provider_errors import ProviderError
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -14,9 +16,9 @@ class Settings:
     data_dir: Path = ROOT / "data"
     model_path: Path = ROOT / "models" / "fraud_model.pkl"
     chroma_dir: Path = ROOT / "data" / "chroma"
-    collection_name: str = "insurance_documents_v1"
-    embedding_model: str = "text-embedding-3-small"
-    chat_model: str = "gpt-4.1-mini"
+    collection_name: str = "insurance_gemini_embedding2_v1"
+    embedding_model: str = "gemini-embedding-2"
+    chat_model: str = "gemini-2.5-flash-lite"
     fraud_threshold: float = 0.5
 
     def __post_init__(self):
@@ -27,11 +29,13 @@ class Settings:
     def from_env(cls):
         load_dotenv(ROOT / ".env", override=False)
         return cls(
-            chat_model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4.1-mini"),
+            chat_model=os.getenv("GEMINI_CHAT_MODEL", "gemini-2.5-flash-lite"),
             fraud_threshold=float(os.getenv("FRAUD_THRESHOLD", "0.5")),
         )
 
 
-def require_openai_key():
-    if not os.getenv("OPENAI_API_KEY", "").strip():
-        raise RuntimeError("OPENAI_API_KEY fehlt. In .env oder der Umgebung setzen.")
+def require_google_key() -> str:
+    key = os.getenv("GOOGLE_API_KEY", "").strip()
+    if not key or key.startswith("YOUR_"):
+        raise ProviderError("google_key_missing", "GOOGLE_API_KEY fehlt. Den neuen Gemini-Key lokal in .env eintragen.")
+    return key
