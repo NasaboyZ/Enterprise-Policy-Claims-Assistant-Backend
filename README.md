@@ -4,7 +4,7 @@ Dieses Repository enthält das Python-Backend für den **Enterprise Policy & Cla
 
 Das Ziel dieses Projekts ist es, unstrukturierte Daten (Versicherungspolicen) und strukturierte Daten (Schadenshistorie) systematisch, sicher und halluzinationsfrei zu verarbeiten.
 
-## 🎯 Was in diesem Projekt konkret gezeigt wird
+## Was in diesem Projekt konkret gezeigt wird
 
 Dieses Backend deckt die Kernkompetenzen eines modernen AI Engineers ab:
 
@@ -35,7 +35,7 @@ Dieses Backend deckt die Kernkompetenzen eines modernen AI Engineers ab:
 
 ---
 
-## 🚀 Quickstart
+## Quickstart
 
 1. **Abhängigkeiten installieren:**
    ```bash
