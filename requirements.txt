@@ -8,6 +8,8 @@ langchain-google-genai==4.4.0
 google-genai==2.26.0
 langchain-chroma==1.1.0
 langchain-text-splitters==1.1.2
+# Local German/English embeddings through ONNX, without an embedding API key.
+fastembed==0.8.1
 langgraph==1.2.12
 chromadb==1.5.9
 scikit-learn==1.9.1

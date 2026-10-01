@@ -14,7 +14,7 @@ from langchain_core.embeddings import Embeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.config import Settings
-from app.gemini_embeddings import GeminiEmbeddings
+from app.local_embeddings import LocalEmbeddings
 
 CHUNK_SIZE = 600
 CHUNK_OVERLAP = 80
@@ -47,8 +47,8 @@ class RagEngine:
             path=str(self.settings.chroma_dir),
             settings=ChromaSettings(anonymized_telemetry=False),
         )
-        expected = {"embedding_model": self.settings.embedding_model, "schema_version": 2,
-                    "embedding_provider": "google", "embedding_format": "retrieval-prefix-v1"}
+        expected = {"embedding_model": self.settings.embedding_model, "schema_version": 3,
+                    "embedding_provider": "local", "embedding_format": "fastembed-passage-query-v1"}
         try:
             collection = client.get_collection(self.settings.collection_name)
         except NotFoundError:
@@ -67,7 +67,8 @@ class RagEngine:
 
     def _embeddings(self) -> Embeddings:
         if self.embeddings is None:
-            self.embeddings = GeminiEmbeddings(model=self.settings.embedding_model)
+            self.embeddings = LocalEmbeddings(model=self.settings.embedding_model,
+                                              cache_dir=self.settings.embedding_cache_dir)
         return self.embeddings
 
     def load_chunks(self):
@@ -103,7 +104,7 @@ class RagEngine:
         desired = {chunk.metadata["chunk_id"]: chunk for chunk in chunks}
         additions = sorted(set(desired) - existing)
         removals = sorted(existing - set(desired))
-        # Obtain all new embeddings first. An API failure leaves existing content intact.
+        # Obtain all new embeddings first. An embedding failure leaves existing content intact.
         if additions:
             documents = [desired[identifier] for identifier in additions]
             vectors = self._embeddings().embed_documents([d.page_content for d in documents])

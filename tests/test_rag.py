@@ -95,8 +95,5 @@ def test_missing_empty_and_incompatible_index(engine, monkeypatch):
     incompatible = RagEngine(replace(engine.settings, embedding_model="other"), engine.embeddings)
     with pytest.raises(RagError, match="passt nicht"):
         incompatible.retrieve("Wasser")
-    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
-    with pytest.raises(RuntimeError, match="GOOGLE_API_KEY"):
-        RagEngine(engine.settings).retrieve("Wasser")
     with pytest.raises(ValueError):
         engine.retrieve(" ")

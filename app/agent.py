@@ -12,11 +12,12 @@ import numpy as np
 import pandas as pd
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from app.config import Settings, require_google_key
-from app.provider_errors import ProviderError, translate_provider_error
+from app.config import Settings, require_aion_key, require_google_key
+from app.provider_errors import ProviderError, translate_aion_error, translate_provider_error
 from app.ml_model import FEATURES
 from app.rag_engine import RagEngine, RetrievedChunk
 
@@ -144,6 +145,47 @@ class GeminiAnswerGenerator:
             raise translate_provider_error(exc) from None
 
 
+class AionAnswerGenerator:
+    def __init__(self, settings: Settings):
+        self.settings = settings
+        self.model = None
+
+    def generate(self, query: str, context: list[RetrievedChunk]) -> GroundedAnswer:
+        try:
+            if self.model is None:
+                self.model = ChatOpenAI(
+                    model=self.settings.aion_chat_model, api_key=require_aion_key(),
+                    base_url="https://api.aionlabs.ai/v1", use_responses_api=False,
+                    temperature=0, timeout=60, max_retries=0,
+                    # Aion documents max_tokens; LangChain otherwise renames it.
+                    extra_body={"max_tokens": 4096},
+                )
+            response = self.model.invoke([
+                SystemMessage(content=SYSTEM_PROMPT + "\nAntworte ausschliesslich mit einem JSON-Objekt "
+                              "gemäss diesem Schema, ohne Markdown oder zusätzlichen Text:\n"
+                              + json.dumps(GroundedAnswer.model_json_schema(), ensure_ascii=False)),
+                HumanMessage(content=json.dumps({"question": query, "sources": [asdict(c) for c in context]},
+                                               ensure_ascii=False)),
+            ])
+        except Exception as exc:
+            raise translate_aion_error(exc) from None
+        if (response.response_metadata.get("finish_reason") != "stop"
+                or not isinstance(response.content, str) or not response.content.strip()):
+            raise ProviderError("aion_invalid_response", "AionLabs hat keine vollständige Antwort geliefert. Bitte erneut versuchen.")
+        try:
+            return GroundedAnswer.model_validate_json(response.content, strict=True)
+        except ValidationError:
+            raise ProviderError("aion_invalid_response", "Die AionLabs-Antwort entsprach nicht dem erforderlichen Format und wurde verworfen.") from None
+
+
+def create_answer_generator(settings: Settings) -> AnswerGenerator:
+    if settings.chat_provider == "aion":
+        return AionAnswerGenerator(settings)
+    if settings.chat_provider == "gemini":
+        return GeminiAnswerGenerator(settings)
+    raise ValueError("CHAT_PROVIDER muss aion oder gemini sein.")
+
+
 def error_state(code: str, message: str) -> dict:
     return {"status": "error", "error_code": code, "final_answer": message, "sources": []}
 
@@ -224,7 +266,7 @@ class InsuranceAgent:
                  retriever: Retriever | None = None, generator: AnswerGenerator | None = None):
         settings = settings or Settings.from_env()
         self.graph = build_graph(settings, scorer or ModelRiskScorer(settings),
-                                 retriever or RagEngine(settings), generator or GeminiAnswerGenerator(settings))
+                                 retriever or RagEngine(settings), generator or create_answer_generator(settings))
 
     def run(self, request: AgentRequest | dict) -> AgentResult:
         request = AgentRequest.model_validate(request)

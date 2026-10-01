@@ -59,12 +59,14 @@ def test_embedding2_one_vector_per_document_and_retrieval_prefixes(monkeypatch):
     requests = []
     def handler(request):
         assert request.url.host == "generativelanguage.googleapis.com"
-        assert "gemini-embedding-2:embedContent" in request.url.path
+        assert "gemini-embedding-2:batchEmbedContents" in request.url.path
         body = json.loads(request.content)
-        assert "taskType" not in body
+        assert len(body["requests"]) == 1
+        item = body["requests"][0]
+        assert "taskType" not in item
         assert request.headers["x-goog-api-key"] == "offline-test-key"
-        requests.append(body["content"]["parts"][0]["text"])
-        return httpx.Response(200, json={"embedding": {"values": [1.0, float(len(requests))]}})
+        requests.append(item["content"]["parts"][0]["text"])
+        return httpx.Response(200, json={"embeddings": [{"values": [1.0, float(len(requests))]}]})
     install_embedding_transport(monkeypatch, handler)
     embeddings = GeminiEmbeddings()
     try:
@@ -153,7 +155,7 @@ def test_old_openai_collection_is_preserved(tmp_path, embeddings):
     rag = _RAG_CLASS(settings, embeddings)
     assert rag.index()["added"] > 0
     assert old.get(include=["documents"])["documents"] == ["Old document"]
-    assert client.get_collection(settings.collection_name).metadata["embedding_provider"] == "google"
+    assert client.get_collection(settings.collection_name).metadata["embedding_provider"] == "local"
     assert rag.retrieve("Selbstbehalt")[0].chunk_id != "old"
 
 

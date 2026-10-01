@@ -2,12 +2,40 @@
 
 import httpx
 from google.genai.errors import APIError
+from openai import APIConnectionError, APIStatusError
 
 
 class ProviderError(RuntimeError):
     def __init__(self, code: str, message: str):
         super().__init__(message)
         self.code = code
+
+
+def translate_aion_error(error: Exception) -> ProviderError:
+    current = error
+    seen = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, ProviderError):
+            return current
+        if isinstance(current, APIStatusError):
+            code = current.status_code
+            if code == 401:
+                return ProviderError("aion_auth_failed", "AionLabs hat den API-Key abgelehnt. AION_API_KEY prüfen.")
+            if code == 403:
+                return ProviderError("aion_access_denied", "AionLabs-Zugriff verweigert. API-Key und Kontoberechtigungen prüfen.")
+            if code == 429:
+                return ProviderError("aion_quota_exceeded", "AionLabs-Kontingent oder Anfragelimit erreicht. Nach Rücksetzung des Limits erneut versuchen.")
+            if code == 404:
+                return ProviderError("aion_model_unavailable", "Das konfigurierte AionLabs-Modell ist nicht verfügbar. AION_CHAT_MODEL prüfen.")
+            if code == 400:
+                return ProviderError("aion_request_rejected", "AionLabs hat die Anfrage abgelehnt. AION_CHAT_MODEL und Anfrageformat prüfen.")
+            if code >= 500:
+                return ProviderError("aion_unavailable", "AionLabs ist vorübergehend nicht verfügbar. Später erneut versuchen.")
+        if isinstance(current, (APIConnectionError, httpx.TransportError, TimeoutError, ConnectionError)):
+            return ProviderError("aion_connection_failed", "Verbindung zu AionLabs fehlgeschlagen oder Zeitlimit erreicht. Bitte erneut versuchen.")
+        current = current.__cause__ or current.__context__
+    return ProviderError("aion_request_failed", "AionLabs-Anfrage fehlgeschlagen. Modell, API-Konfiguration und Dienstverfügbarkeit prüfen.")
 
 
 def translate_provider_error(error: Exception) -> ProviderError:
