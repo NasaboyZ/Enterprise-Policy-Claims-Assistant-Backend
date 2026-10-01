@@ -44,11 +44,12 @@ class EvaluationReport(ReportModel):
     error_code: str | None = None
     notes: list[str] = Field(default_factory=lambda: [
         "Synthetische Demo; keine Produktionsvalidierung.",
-        "Aion bewertet Antworten desselben Modells; keine unabhängige Bewertung.",
+        "Das konfigurierte Antwortmodell bewertet Antworten desselben Modells; keine unabhängige Bewertung.",
         "AnswerRelevancy verwendet eine Vergleichsfrage (strictness=1).",
         "Referenzantworten dienen der Nachprüfung; diese Metriken prüfen nicht vollständig die fachliche Korrektheit.",
     ])
     failure_type: str | None = None
+    failure_fields: list[dict[str, str]] = Field(default_factory=list)
 
 
 def finalize_report(report: EvaluationReport) -> int:

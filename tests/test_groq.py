@@ -1,4 +1,4 @@
-"""Exercise Aion's actual LangChain/OpenAI client without network or real keys."""
+"""Exercise Groq's actual LangChain/OpenAI client without network or real keys."""
 
 import json
 from dataclasses import replace
@@ -9,9 +9,9 @@ import pytest
 from openai import RateLimitError
 
 from app import agent as agent_module, config
-from app.agent import AionAnswerGenerator, GeminiAnswerGenerator, InsuranceAgent, create_answer_generator
-from app.config import Settings, require_aion_key
-from app.provider_errors import ProviderError, translate_aion_error
+from app.agent import GroqAnswerGenerator, GeminiAnswerGenerator, InsuranceAgent, create_answer_generator
+from app.config import Settings, require_groq_key
+from app.provider_errors import ProviderError, translate_groq_error
 from app.rag_engine import RetrievedChunk
 
 
@@ -25,7 +25,7 @@ ANSWER = {"supported": True, "statements": [{"text": "Der Selbstbehalt beträgt 
 @pytest.fixture(autouse=True)
 def isolated_config(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "ROOT", tmp_path)
-    for name in ("CHAT_PROVIDER", "AION_CHAT_MODEL", "AION_API_KEY", "GEMINI_CHAT_MODEL", "FRAUD_THRESHOLD"):
+    for name in ("CHAT_PROVIDER", "GROQ_CHAT_MODEL", "GROQ_API_KEY", "GEMINI_CHAT_MODEL", "FRAUD_THRESHOLD"):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -35,7 +35,7 @@ def install_transport(monkeypatch):
     clients = []
 
     def install(handler):
-        monkeypatch.setenv("AION_API_KEY", "offline-aion-key")
+        monkeypatch.setenv("GROQ_API_KEY", "offline-groq-key")
         # A different provider's credentials and endpoint must never be used.
         monkeypatch.setenv("OPENAI_API_KEY", "wrong-provider-key")
         monkeypatch.setenv("OPENAI_API_BASE", "https://wrong-provider.invalid/v1")
@@ -56,7 +56,7 @@ def install_transport(monkeypatch):
 def completion(content, finish_reason="stop"):
     return httpx.Response(200, json={
         "id": "offline-completion", "object": "chat.completion", "created": 0,
-        "model": "aion-labs/aion-2.0",
+        "model": "openai/gpt-oss-120b",
         "choices": [{"index": 0, "message": {"role": "assistant", "content": content},
                      "finish_reason": finish_reason}],
         "usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
@@ -64,74 +64,79 @@ def completion(content, finish_reason="stop"):
 
 
 def run_agent(settings=None):
-    return InsuranceAgent(settings or Settings(chat_provider="aion"), scorer=Mock(score=Mock(return_value=0.1)),
+    return InsuranceAgent(settings or Settings(chat_provider="groq"), scorer=Mock(score=Mock(return_value=0.1)),
                           retriever=Mock(retrieve=Mock(return_value=CONTEXT))).run(REQUEST)
 
 
 def test_config_defaults_dotenv_and_shell_precedence(tmp_path, monkeypatch):
     defaults = Settings.from_env()
     assert defaults.chat_provider == "groq"
-    assert defaults.aion_chat_model == "aion-labs/aion-2.0"
+    assert defaults.groq_chat_model == "openai/gpt-oss-120b"
     path = tmp_path / ".env"
-    original = ("AION_API_KEY= fake-file-key \nAION_CHAT_MODEL=aion-labs/aion-3.0-mini\n"
-                "CHAT_PROVIDER=aion\nGEMINI_CHAT_MODEL=gemini-custom\n")
+    original = ("GROQ_API_KEY= fake-file-key \nGROQ_CHAT_MODEL=openai/gpt-oss-20b\n"
+                "CHAT_PROVIDER=groq\nGEMINI_CHAT_MODEL=gemini-custom\n")
     path.write_text(original)
     settings = Settings.from_env()
-    assert require_aion_key() == "fake-file-key"
-    assert settings.aion_chat_model == "aion-labs/aion-3.0-mini"
+    assert require_groq_key() == "fake-file-key"
+    assert settings.groq_chat_model == "openai/gpt-oss-20b"
     assert settings.chat_model == "gemini-custom"
     monkeypatch.setenv("CHAT_PROVIDER", "gemini")
-    monkeypatch.setenv("AION_CHAT_MODEL", "aion-labs/aion-2.0")
+    monkeypatch.setenv("GROQ_CHAT_MODEL", "openai/gpt-oss-120b")
     assert Settings.from_env().chat_provider == "gemini"
-    assert Settings.from_env().aion_chat_model == "aion-labs/aion-2.0"
+    assert Settings.from_env().groq_chat_model == "openai/gpt-oss-120b"
     assert path.read_text() == original
 
 
-@pytest.mark.parametrize("kwargs", [{"chat_provider": "unknown"}, {"aion_chat_model": " "}])
+@pytest.mark.parametrize("kwargs", [{"chat_provider": "unknown"}, {"groq_chat_model": " "}])
 def test_invalid_settings_rejected(kwargs):
     with pytest.raises(ValueError):
         Settings(**kwargs)
 
 
 def test_provider_selection_is_explicit():
-    assert isinstance(create_answer_generator(Settings(chat_provider="aion")), AionAnswerGenerator)
+    assert isinstance(create_answer_generator(Settings(chat_provider="groq")), GroqAnswerGenerator)
     assert isinstance(create_answer_generator(Settings(chat_provider="gemini")), GeminiAnswerGenerator)
 
 
-@pytest.mark.parametrize("key", [None, "", " ", "YOUR_AION_KEY"])
+@pytest.mark.parametrize("key", [None, "", " ", "YOUR_GROQ_KEY"])
 def test_missing_key_never_uses_other_credentials(key, monkeypatch):
     if key is not None:
-        monkeypatch.setenv("AION_API_KEY", key)
+        monkeypatch.setenv("GROQ_API_KEY", key)
     monkeypatch.setenv("GOOGLE_API_KEY", "wrong-google-key")
+    monkeypatch.setenv("AION_API_KEY", "wrong-aion-key")
     monkeypatch.setenv("OPENAI_API_KEY", "wrong-openai-key")
     client = Mock(side_effect=AssertionError("No client should be created"))
     monkeypatch.setattr(agent_module, "ChatOpenAI", client)
     result = run_agent()
-    assert result.error_code == "aion_key_missing"
+    assert result.error_code == "groq_key_missing"
     assert result.status == "error" and result.sources == []
     client.assert_not_called()
 
 
-def test_real_client_routes_to_aion_and_returns_cited_answer(install_transport):
+def test_real_client_routes_to_groq_and_returns_cited_answer(install_transport):
     calls = []
 
     def handler(request):
-        assert str(request.url) == "https://api.aionlabs.ai/v1/chat/completions"
-        assert request.headers["authorization"] == "Bearer offline-aion-key"
+        assert str(request.url) == "https://api.groq.com/openai/v1/chat/completions"
+        assert request.headers["authorization"] == "Bearer offline-groq-key"
         body = json.loads(request.content)
         calls.append(body)
-        assert body["model"] == "aion-labs/aion-3.0-mini"
-        assert body["max_tokens"] == 4096
-        assert "max_completion_tokens" not in body and "response_format" not in body
+        assert body["model"] == "openai/gpt-oss-20b"
+        assert body["max_completion_tokens"] == 4096
+        assert body["reasoning_effort"] == "low"
+        schema = body["response_format"]["json_schema"]
+        assert body["response_format"]["type"] == "json_schema"
+        assert schema["strict"] is True
+        assert schema["schema"]["additionalProperties"] is False
+        assert schema["schema"]["$defs"]["CitedStatement"]["additionalProperties"] is False
         assert body["stream"] is False
-        assert "JSON" in body["messages"][0]["content"]
         message = json.loads(body["messages"][1]["content"])
         assert message["question"] == REQUEST["query"]
         assert message["sources"][0]["source_id"] == "S1"
         return completion(json.dumps(ANSWER))
 
     install_transport(handler)
-    result = run_agent(replace(Settings(chat_provider="aion"), aion_chat_model="aion-labs/aion-3.0-mini"))
+    result = run_agent(replace(Settings(chat_provider="groq"), groq_chat_model="openai/gpt-oss-20b"))
     assert result.status == "answered" and result.error_code is None
     assert result.final_answer.endswith("[S1]") and result.sources[0]["filename"] == "avb.pdf"
     assert len(calls) == 1
@@ -149,7 +154,7 @@ def test_real_client_routes_to_aion_and_returns_cited_answer(install_transport):
 def test_invalid_or_incomplete_answers_are_suppressed(install_transport, content, finish):
     install_transport(lambda request: completion(content, finish))
     result = run_agent()
-    assert result.status == "error" and result.error_code == "aion_invalid_response"
+    assert result.status == "error" and result.error_code == "groq_invalid_response"
     assert result.sources == [] and "sensitive-output" not in result.model_dump_json()
 
 
@@ -166,8 +171,8 @@ def test_abstention_and_source_validation(install_transport, answer, expected_st
 
 
 @pytest.mark.parametrize("status,code", [
-    (400, "aion_request_rejected"), (401, "aion_auth_failed"), (403, "aion_access_denied"),
-    (404, "aion_model_unavailable"), (429, "aion_quota_exceeded"), (502, "aion_unavailable"),
+    (400, "groq_request_rejected"), (401, "groq_auth_failed"), (403, "groq_access_denied"),
+    (404, "groq_model_unavailable"), (429, "groq_quota_exceeded"), (502, "groq_unavailable"),
 ])
 def test_http_failures_are_safe_without_retry_or_fallback(install_transport, monkeypatch, status, code):
     calls = []
@@ -196,18 +201,18 @@ def test_transport_failures_without_retry(install_transport, error_type):
 
     install_transport(handler)
     result = run_agent()
-    assert result.status == "error" and result.error_code == "aion_connection_failed"
+    assert result.status == "error" and result.error_code == "groq_connection_failed"
     assert "sensitive" not in result.model_dump_json() and len(calls) == 1
 
 
 def test_wrapped_provider_error_and_unknown_errors_are_safe():
-    response = httpx.Response(429, request=httpx.Request("POST", "https://api.aionlabs.ai/v1/chat/completions"))
+    response = httpx.Response(429, request=httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions"))
     original = RateLimitError("sensitive-key", response=response, body=None)
     wrapped = RuntimeError("sensitive-wrapper")
     wrapped.__cause__ = original
-    translated = translate_aion_error(wrapped)
-    assert translated.code == "aion_quota_exceeded" and "sensitive" not in str(translated)
-    unknown = translate_aion_error(RuntimeError("sensitive"))
-    assert unknown.code == "aion_request_failed" and "sensitive" not in str(unknown)
-    own = ProviderError("aion_key_missing", "AION_API_KEY fehlt.")
-    assert translate_aion_error(own) is own
+    translated = translate_groq_error(wrapped)
+    assert translated.code == "groq_quota_exceeded" and "sensitive" not in str(translated)
+    unknown = translate_groq_error(RuntimeError("sensitive"))
+    assert unknown.code == "groq_request_failed" and "sensitive" not in str(unknown)
+    own = ProviderError("groq_key_missing", "GROQ_API_KEY fehlt.")
+    assert translate_groq_error(own) is own

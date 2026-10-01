@@ -12,20 +12,25 @@ class LocalEmbeddings(Embeddings):
     def __init__(self, model: str, cache_dir: Path):
         self.model_name = model
         self.cache_dir = cache_dir
-        self.model = None
+        self._model = None
+
+    @property
+    def model(self) -> str:
+        """LangChain/Ragas adapters expect model metadata to be a name, not a client."""
+        return self.model_name
 
     def _load(self):
-        if self.model is None:
+        if self._model is None:
             try:
                 from fastembed import TextEmbedding
             except ImportError:
                 raise ProviderError("local_embeddings_missing", "Lokale Embeddings fehlen. Bitte python -m pip install -r requirements.txt ausführen.") from None
             try:
-                self.model = TextEmbedding(model_name=self.model_name, cache_dir=str(self.cache_dir),
+                self._model = TextEmbedding(model_name=self.model_name, cache_dir=str(self.cache_dir),
                                            threads=2, providers=["CPUExecutionProvider"])
             except Exception:
                 raise ProviderError("local_embeddings_unavailable", "Das lokale Embedding-Modell konnte nicht geladen werden. Für den ersten Modelldownload ist Internet nötig; danach läuft die Suche lokal. Speicherplatz und models/embeddings prüfen.") from None
-        return self.model
+        return self._model
 
     def _embed(self, texts: list[str], *, query: bool) -> list[list[float]]:
         if not texts:

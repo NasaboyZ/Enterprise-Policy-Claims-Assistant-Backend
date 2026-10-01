@@ -21,13 +21,16 @@ class Settings:
     embedding_cache_dir: Path = ROOT / "models" / "embeddings"
     reports_dir: Path = ROOT / "reports"
     chat_model: str = "gemini-2.5-flash-lite"
-    chat_provider: str = "aion"
+    chat_provider: str = "groq"
+    groq_chat_model: str = "openai/gpt-oss-120b"
     aion_chat_model: str = "aion-labs/aion-2.0"
     fraud_threshold: float = 0.5
 
     def __post_init__(self):
-        if self.chat_provider not in {"aion", "gemini"}:
-            raise ValueError("CHAT_PROVIDER muss aion oder gemini sein.")
+        if self.chat_provider not in {"groq", "aion", "gemini"}:
+            raise ValueError("CHAT_PROVIDER muss groq, aion oder gemini sein.")
+        if not self.groq_chat_model.strip():
+            raise ValueError("GROQ_CHAT_MODEL darf nicht leer sein.")
         if not self.aion_chat_model.strip():
             raise ValueError("AION_CHAT_MODEL darf nicht leer sein.")
         if not 0 <= self.fraud_threshold <= 1:
@@ -42,11 +45,19 @@ class Settings:
             chroma_dir=Path(os.getenv("CHROMA_DIR", str(ROOT / "data" / "chroma"))),
             embedding_cache_dir=Path(os.getenv("EMBEDDING_CACHE_DIR", str(ROOT / "models" / "embeddings"))),
             reports_dir=Path(os.getenv("REPORTS_DIR", str(ROOT / "reports"))),
-            chat_provider=os.getenv("CHAT_PROVIDER", "aion").strip().lower(),
+            chat_provider=os.getenv("CHAT_PROVIDER", "groq").strip().lower(),
+            groq_chat_model=os.getenv("GROQ_CHAT_MODEL", "openai/gpt-oss-120b").strip(),
             aion_chat_model=os.getenv("AION_CHAT_MODEL", "aion-labs/aion-2.0").strip(),
             chat_model=os.getenv("GEMINI_CHAT_MODEL", "gemini-2.5-flash-lite"),
             fraud_threshold=float(os.getenv("FRAUD_THRESHOLD", "0.5")),
         )
+
+
+def require_groq_key() -> str:
+    key = os.getenv("GROQ_API_KEY", "").strip()
+    if not key or key.startswith("YOUR_"):
+        raise ProviderError("groq_key_missing", "GROQ_API_KEY fehlt. Den Groq-Key lokal in .env eintragen.")
+    return key
 
 
 def require_google_key() -> str:

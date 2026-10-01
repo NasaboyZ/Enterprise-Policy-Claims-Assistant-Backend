@@ -2,7 +2,7 @@
 
 import httpx
 from google.genai.errors import APIError
-from openai import APIConnectionError, APIStatusError
+from openai import APIConnectionError, APIStatusError, ContentFilterFinishReasonError, LengthFinishReasonError
 
 
 class ProviderError(RuntimeError):
@@ -36,6 +36,35 @@ def translate_aion_error(error: Exception) -> ProviderError:
             return ProviderError("aion_connection_failed", "Verbindung zu AionLabs fehlgeschlagen oder Zeitlimit erreicht. Bitte erneut versuchen.")
         current = current.__cause__ or current.__context__
     return ProviderError("aion_request_failed", "AionLabs-Anfrage fehlgeschlagen. Modell, API-Konfiguration und Dienstverfügbarkeit prüfen.")
+
+
+def translate_groq_error(error: Exception) -> ProviderError:
+    current = error
+    seen = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, ProviderError):
+            return current
+        if isinstance(current, (LengthFinishReasonError, ContentFilterFinishReasonError)):
+            return ProviderError("groq_invalid_response", "Groq hat keine vollständige Antwort geliefert. Bitte erneut versuchen.")
+        if isinstance(current, APIStatusError):
+            code = current.status_code
+            if code == 401:
+                return ProviderError("groq_auth_failed", "Groq hat den API-Key abgelehnt. GROQ_API_KEY prüfen.")
+            if code == 403:
+                return ProviderError("groq_access_denied", "Groq-Zugriff verweigert. API-Key und Kontoberechtigungen prüfen.")
+            if code == 429:
+                return ProviderError("groq_quota_exceeded", "Groq-Kontingent oder Anfragelimit erreicht. Nach Rücksetzung des Limits erneut versuchen.")
+            if code == 404:
+                return ProviderError("groq_model_unavailable", "Das konfigurierte Groq-Modell ist nicht verfügbar. GROQ_CHAT_MODEL prüfen.")
+            if code == 400:
+                return ProviderError("groq_request_rejected", "Groq hat die Anfrage abgelehnt. GROQ_CHAT_MODEL und Anfrageformat prüfen.")
+            if code >= 500:
+                return ProviderError("groq_unavailable", "Groq ist vorübergehend nicht verfügbar. Später erneut versuchen.")
+        if isinstance(current, (APIConnectionError, httpx.TransportError, TimeoutError, ConnectionError)):
+            return ProviderError("groq_connection_failed", "Verbindung zu Groq fehlgeschlagen oder Zeitlimit erreicht. Bitte erneut versuchen.")
+        current = current.__cause__ or current.__context__
+    return ProviderError("groq_request_failed", "Groq-Anfrage fehlgeschlagen. Modell, API-Konfiguration und Dienstverfügbarkeit prüfen.")
 
 
 def translate_provider_error(error: Exception) -> ProviderError:

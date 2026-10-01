@@ -22,9 +22,9 @@ from ragas.metrics._answer_relevance import AnswerRelevancy, ResponseRelevancePr
 from ragas.metrics._faithfulness import Faithfulness, NLIStatementPrompt, StatementGeneratorPrompt
 from ragas.run_config import RunConfig
 
-from app.agent import AionAnswerGenerator, InsuranceAgent, create_aion_chat_model
+from app.agent import InsuranceAgent, create_answer_generator, create_aion_chat_model, create_groq_chat_model
 from app.config import ROOT, Settings
-from app.provider_errors import ProviderError, translate_aion_error
+from app.provider_errors import ProviderError, translate_aion_error, translate_groq_error, translate_provider_error
 from app.rag_engine import RagEngine
 from app.reports import CaseResult, EvaluationReport, finalize_report, save_report
 
@@ -93,12 +93,14 @@ async def run_evaluation(settings, *, limit=None, faithfulness=0.80, relevance=0
     dataset_path = ROOT / "data" / "eval_cases.json"
     cases = json.loads(dataset_path.read_text(encoding="utf-8"))
     selected = cases[:limit] if limit is not None else cases
+    model = {"groq": settings.groq_chat_model, "aion": settings.aion_chat_model,
+             "gemini": settings.chat_model}[settings.chat_provider]
     report = EvaluationReport(
         total_cases=len(cases), selected_cases=len(selected),
-        config={"provider": "aion", "answer_model": settings.aion_chat_model,
-                "judge_model": settings.aion_chat_model, "embedding_model": settings.embedding_model,
+        config={"provider": settings.chat_provider, "answer_model": model,
+                "judge_model": model, "embedding_model": settings.embedding_model,
                 "ragas_version": "0.4.3", "relevancy_strictness": 1, "request_interval_seconds": 5,
-                "judge_reasoning_effort": "none", "judge_max_tokens": 2048,
+                "judge_reasoning_effort": "low" if settings.chat_provider == "groq" else "none", "judge_max_tokens": 2048,
                 "fraud_threshold": settings.fraud_threshold,
                 "ml_model_sha256": hashlib.sha256(settings.model_path.read_bytes()).hexdigest() if settings.model_path.is_file() else None},
         corpus_sha256={p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(settings.data_dir.glob("*.pdf"))},
@@ -108,15 +110,19 @@ async def run_evaluation(settings, *, limit=None, faithfulness=0.80, relevance=0
     try:
         if agent is None or judge is None:
             limiter = InMemoryRateLimiter(requests_per_second=0.2, check_every_n_seconds=0.1, max_bucket_size=1)
-            client = create_aion_chat_model(settings, rate_limiter=limiter)
+            if settings.chat_provider == "groq":
+                client = create_groq_chat_model(settings, rate_limiter=limiter)
+                judge_client = client.model_copy(update={"max_tokens": 2048})
+            elif settings.chat_provider == "aion":
+                client = create_aion_chat_model(settings, rate_limiter=limiter)
+                judge_client = client.model_copy(update={"reasoning_effort": "none", "extra_body": {"max_tokens": 2048}})
+            else:
+                raise ProviderError("evaluation_provider_unsupported", "Die Evaluation unterstützt CHAT_PROVIDER=groq oder aion.")
             rag = RagEngine(settings)
             recorder = RecordingRetriever(rag)
-            generator = AionAnswerGenerator(settings)
+            generator = create_answer_generator(settings)
             generator.model = client
             agent = InsuranceAgent(settings, retriever=recorder, generator=generator)
-            # Short classification tasks do not need the model's default reasoning
-            # budget. Keep the answer generator unchanged and share only the limiter.
-            judge_client = client.model_copy(update={"reasoning_effort": "none", "extra_body": {"max_tokens": 2048}})
             judge = RagasJudge(judge_client, rag._embeddings())
         for case in selected:
             print(f"Evaluation: {case['id']}", file=sys.stderr, flush=True)
@@ -141,11 +147,15 @@ async def run_evaluation(settings, *, limit=None, faithfulness=0.80, relevance=0
                 setattr(item, name, value)
             save_report(report, settings.reports_dir)
     except Exception as exc:
-        error = translate_aion_error(exc)
-        report.error_code = error.code if error.code != "aion_request_failed" else "evaluation_failed"
+        translate = {"groq": translate_groq_error, "aion": translate_aion_error,
+                     "gemini": translate_provider_error}[settings.chat_provider]
+        error = translate(exc)
+        report.error_code = "evaluation_failed" if error.code.endswith("_request_failed") else error.code
         report.failure_type = type(exc).__name__
         if isinstance(exc, ValidationError):
             report.error_code = "evaluation_invalid_output"
+            report.failure_fields = [{"field": ".".join(map(str, error["loc"])), "type": error["type"]}
+                                     for error in exc.errors(include_input=False, include_url=False)]
         if report.cases:
             report.cases[-1].error_code = report.error_code
     code = finalize_report(report)

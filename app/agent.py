@@ -16,8 +16,8 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from app.config import Settings, require_aion_key, require_google_key
-from app.provider_errors import ProviderError, translate_aion_error, translate_provider_error
+from app.config import Settings, require_aion_key, require_google_key, require_groq_key
+from app.provider_errors import ProviderError, translate_aion_error, translate_groq_error, translate_provider_error
 from app.ml_model import FEATURES
 from app.rag_engine import RagEngine, RetrievedChunk
 
@@ -182,12 +182,50 @@ class AionAnswerGenerator:
             raise ProviderError("aion_invalid_response", "Die AionLabs-Antwort entsprach nicht dem erforderlichen Format und wurde verworfen.") from None
 
 
+def create_groq_chat_model(settings: Settings, *, rate_limiter=None):
+    return ChatOpenAI(
+        model=settings.groq_chat_model, api_key=require_groq_key(),
+        base_url="https://api.groq.com/openai/v1", use_responses_api=False,
+        temperature=0, timeout=60, max_retries=0, rate_limiter=rate_limiter,
+        max_tokens=4096, reasoning_effort="low",
+    )
+
+
+class GroqAnswerGenerator:
+    def __init__(self, settings: Settings):
+        self.settings = settings
+        self.model = None
+
+    def generate(self, query: str, context: list[RetrievedChunk]) -> GroundedAnswer:
+        try:
+            if self.model is None:
+                self.model = create_groq_chat_model(self.settings)
+            response = self.model.invoke([
+                SystemMessage(content=SYSTEM_PROMPT),
+                HumanMessage(content=json.dumps({"question": query, "sources": [asdict(c) for c in context]},
+                                               ensure_ascii=False)),
+            ], response_format={"type": "json_schema", "json_schema": {
+                "name": "GroundedAnswer", "strict": True, "schema": GroundedAnswer.model_json_schema(),
+            }})
+        except Exception as exc:
+            raise translate_groq_error(exc) from None
+        if (response.response_metadata.get("finish_reason") != "stop"
+                or not isinstance(response.content, str) or not response.content.strip()):
+            raise ProviderError("groq_invalid_response", "Groq hat keine vollständige Antwort geliefert. Bitte erneut versuchen.")
+        try:
+            return GroundedAnswer.model_validate_json(response.content, strict=True)
+        except ValidationError:
+            raise ProviderError("groq_invalid_response", "Die Groq-Antwort entsprach nicht dem erforderlichen Format und wurde verworfen.") from None
+
+
 def create_answer_generator(settings: Settings) -> AnswerGenerator:
+    if settings.chat_provider == "groq":
+        return GroqAnswerGenerator(settings)
     if settings.chat_provider == "aion":
         return AionAnswerGenerator(settings)
     if settings.chat_provider == "gemini":
         return GeminiAnswerGenerator(settings)
-    raise ValueError("CHAT_PROVIDER muss aion oder gemini sein.")
+    raise ValueError("CHAT_PROVIDER muss groq, aion oder gemini sein.")
 
 
 def error_state(code: str, message: str) -> dict:

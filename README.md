@@ -2,7 +2,7 @@
 
 Dieses Repository enthält das Python-Backend für den **Enterprise Policy & Claims Assistant**. Es demonstriert den Aufbau einer modernen, hybriden KI-Architektur, die klassisches Machine Learning mit generativer KI (Large Language Models) und Agenten-Workflows verbindet.
 
-Das Ziel dieses Projekts ist es, unstrukturierte Daten (Versicherungspolicen) und strukturierte Daten (Schadenshistorie) systematisch, sicher und halluzinationsfrei zu verarbeiten.
+Das Ziel dieses Projekts ist es, unstrukturierte Daten (Versicherungspolicen) und strukturierte Daten (Schadenshistorie) systematisch und mit nachvollziehbaren Quellen zu verarbeiten.
 
 ## Was in diesem Projekt konkret gezeigt wird
 
@@ -45,11 +45,11 @@ Docker Desktop starten und im Backend-Verzeichnis ausführen:
 docker compose up --build -d
 ```
 
-Voraussetzung: Eine lokale `.env` mit `AION_API_KEY` (siehe `.env.example`).
+Voraussetzung: Eine lokale `.env` mit `GROQ_API_KEY` (siehe `.env.example`).
 Der Befehl baut das Image, bereitet ML-Modell und Dokumentenindex vor und startet
 die API. Beim ersten Start wird das lokale Embedding-Modell heruntergeladen;
 das kann einige Minuten dauern. Es wird kein Google-Key benötigt. Der Start
-verbraucht kein Aion-Kontingent und führt keine Ragas-Evaluation aus.
+verbraucht kein Groq-Kontingent und führt keine Ragas-Evaluation aus.
 
 - API und interaktive Dokumentation: **http://localhost:8000/docs**
 - Erreichbarkeit: **http://localhost:8000/health**
@@ -64,7 +64,7 @@ Dateien. Die API wird nur auf `127.0.0.1:8000` veröffentlicht; sie ist eine lok
 Demo ohne Benutzerverwaltung. Genau einen Worker verwenden und während Uploads
 keinen zweiten Indexierungsprozess starten.
 
-Evaluation bewusst separat starten (verbraucht zusätzliche Aion-Anfragen):
+Evaluation bewusst separat starten (verbraucht zusätzliche Groq-Anfragen):
 
 ```bash
 # Ein Testfall; liefert absichtlich Exitcode 2, weil der Gesamtbericht unvollständig ist.
@@ -90,11 +90,11 @@ startet niemals automatisch eine Evaluation.
 2. **API-Zugänge lokal konfigurieren:** Eine neue `.env` anhand von `.env.example`
    anlegen oder die bestehende Datei ergänzen. Vorhandene Schlüssel behalten.
    ```dotenv
-   CHAT_PROVIDER=aion
-   AION_API_KEY=YOUR_AION_KEY
-   AION_CHAT_MODEL=aion-labs/aion-2.0
+   CHAT_PROVIDER=groq
+   GROQ_API_KEY=YOUR_GROQ_KEY
+   GROQ_CHAT_MODEL=openai/gpt-oss-120b
    ```
-   AionLabs erzeugt standardmässig die Antworten. Indexierung und Suche berechnen
+   Groq erzeugt standardmässig die Antworten. Indexierung und Suche berechnen
    Embeddings lokal auf der CPU; ein `GOOGLE_API_KEY` ist dafür nicht erforderlich.
    Schlüssel gehören ausschliesslich in die ignorierte `.env`; nur `.env.example`
    ohne Schlüssel wird versioniert. Um Antworten ausdrücklich über Gemini zu
@@ -102,18 +102,19 @@ startet niemals automatisch eine Evaluation.
    `GEMINI_CHAT_MODEL=gemini-2.5-flash-lite` setzen. Bereits gesetzte
    Prozess-Umgebungsvariablen haben Vorrang vor `.env`.
 
-   Aion verwendet `https://api.aionlabs.ai/v1/chat/completions`. Antworten werden
+   Groq verwendet `https://api.groq.com/openai/v1/chat/completions`. Antworten werden
    lokal als JSON validiert und Quellenverweise geprüft; ungültige oder
    abgeschnittene Antworten werden verworfen. Es gibt keine automatischen
    Wiederholungen oder Wechsel zu einem anderen Anbieter. Eine Anfrage hat
    60 Sekunden Zeitlimit und maximal 4.096 Ausgabetokens einschliesslich Reasoning.
 
-   Der [Aion-Free-Tarif](https://www.aionlabs.ai/docs/rate-limits/) nennt aktuell
-   15 Anfragen pro Minute und 20.000 Tokens pro Tag (Stand: 1. Oktober 2026).
-   Der tatsächliche Tarif wird im Aion-Konto verwaltet, nicht durch diese
-   Konfiguration. Bei ausgeschöpftem Kontingent liefert das Backend eine
-   verständliche Fehlermeldung. Das Modell ist auf Rollenspiel spezialisiert;
-   die fachliche Antwortqualität muss mit den Beispielfragen geprüft werden.
+   Groq hat einen [Free Plan mit Modell- und Kontolimits](https://console.groq.com/docs/rate-limits).
+   Das Modell `openai/gpt-oss-120b` unterstützt das hier verwendete
+   [strikte JSON-Schema](https://console.groq.com/docs/structured-outputs).
+   Bei ausgeschöpftem Kontingent meldet das Backend `groq_quota_exceeded`.
+   Es wechselt nicht automatisch zu einem anderen Anbieter.
+   Nach Änderungen an `.env` den lokalen Server neu starten bzw.
+   `docker compose up --build -d` erneut ausführen, damit Docker die Werte übernimmt.
 
 3. **Dokumente lokal indexieren und suchen:**
    ```bash
@@ -188,14 +189,16 @@ python -m app.eval --faithfulness-threshold 0.80 --relevance-threshold 0.70
 
 Die fünf Referenzfälle stehen in `data/eval_cases.json`. Der echte Agent läuft
 mit einem festgelegten Niedrigrisiko-Schaden. Ragas 0.4.3 bewertet seine Antworten
-gegen die tatsächlich abgerufenen Abschnitte. Aion dient ausdrücklich als
+gegen die tatsächlich abgerufenen Abschnitte. Der konfigurierte Anbieter
+(Standard: Groq; alternativ Aion) dient als
 Antwortmodell und Bewerter; für die Relevanzberechnung werden lokale Embeddings
 und eine Vergleichsfrage pro Antwort verwendet (`strictness=1`). Es gibt keine
-zusätzlichen Prompt-Beispiele; der Bewerter verwendet `reasoning_effort=none`
+zusätzlichen Prompt-Beispiele; der Bewerter verwendet `reasoning_effort=low`
 und höchstens 2.048 Ausgabetokens, um das Kontingent zu schonen. Es gibt keine
 automatischen Anbieterwechsel oder API-/Parser-Wiederholungen. Anfragen haben
 mindestens fünf Sekunden Abstand. Eine vollständige Auswertung benötigt im
-Normalfall etwa 20 Aion-Anfragen und kann das Tageskontingent überschreiten.
+Normalfall etwa 20 LLM-Anfragen und kann Minuten- oder Tageslimits erreichen.
+Gemini wird für die Evaluation nicht unterstützt; es gibt keinen Anbieterwechsel.
 
 Berichte werden unter `reports/<run_id>.json` und atomar als `reports/latest.json`
 gespeichert. Sie enthalten Konfiguration, Daten-Hashes, Referenzen, Antworten,
