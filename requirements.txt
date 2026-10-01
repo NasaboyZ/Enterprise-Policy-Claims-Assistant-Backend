@@ -1,0 +1,19 @@
+# Setup dependencies from phase 1; AI services are implemented in later phases.
+fastapi
+langchain
+langchain-community
+langchain-openai
+langchain-chroma
+langchain-text-splitters
+langgraph
+chromadb
+scikit-learn
+ragas
+uvicorn
+pydantic
+# Data preparation, model persistence and synthetic PDF fixtures.
+pandas
+joblib
+reportlab
+pypdf
+python-dotenv
